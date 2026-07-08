@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
 
 export async function GET(request: Request) {
   try {
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Account ID is required' }, { status: 400 });
     }
 
-    const { accessToken, broker } = await getValidAccessToken(accountId);
+    const { accessToken, broker, apiKey } = await getValidAccessToken(accountId);
 
     if (broker === 'DHAN') {
       const response = await fetch('https://api.dhan.co/v2/holdings', {
@@ -44,6 +44,44 @@ export async function GET(request: Request) {
 
         return {
           symbol: item.tradingSymbol || 'UNKNOWN',
+          exchange: item.exchange || 'NSE',
+          quantity: qty,
+          averagePrice: avgPrice,
+          currentPrice: ltp,
+          marketValue: Number(marketValue.toFixed(2)),
+          pnl: Number(pnl.toFixed(2)),
+          pnlPercentage: Number(pnlPercentage.toFixed(2)),
+        };
+      });
+
+      return NextResponse.json(holdings);
+    } else if (broker === 'ANGELONE') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for AngelOne account.');
+      }
+
+      const response = await fetch('https://apiconnect.angelone.in/rest/secure/angelbroking/portfolio/v1/getHolding', {
+        method: 'GET',
+        headers: getAngelOneHeaders(apiKey, accessToken),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.status) {
+        throw new Error(data.message || 'Failed to fetch holdings from AngelOne');
+      }
+
+      const holdingsList = Array.isArray(data.data) ? data.data : [];
+
+      const holdings = holdingsList.map((item: any) => {
+        const qty = Number(item.quantity || 0);
+        const avgPrice = Number(item.averageprice || 0);
+        const ltp = Number(item.ltp || avgPrice);
+        const marketValue = qty * ltp;
+        const pnl = qty * (ltp - avgPrice);
+        const pnlPercentage = avgPrice > 0 ? ((ltp - avgPrice) / avgPrice) * 100 : 0;
+
+        return {
+          symbol: item.tradingsymbol || 'UNKNOWN',
           exchange: item.exchange || 'NSE',
           quantity: qty,
           averagePrice: avgPrice,

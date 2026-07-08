@@ -160,3 +160,20 @@ export async function getValidAccessToken(accountId: string): Promise<{
   // Fyers doesn't support silent programmatic login (requires manual OAuth redirect page)
   throw new Error('Session expired. Please click "Login" to authorize Fyers via web page.');
 }
+
+/**
+ * Generates standard headers required for the AngelOne OpenAPI endpoints.
+ */
+export function getAngelOneHeaders(apiKey: string, accessToken: string) {
+  return {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'X-UserType': 'USER',
+    'X-SourceID': 'WEB',
+    'X-ClientLocalIP': '192.168.1.1',
+    'X-ClientPublicIP': '106.193.147.98',
+    'X-MACAddress': 'FE:80:00:00:00:00',
+    'X-PrivateKey': apiKey,
+    'Authorization': `Bearer ${accessToken}`,
+  };
+}

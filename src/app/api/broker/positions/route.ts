@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
 
 export async function GET(request: Request) {
   try {
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Account ID is required' }, { status: 400 });
     }
 
-    const { accessToken, broker } = await getValidAccessToken(accountId);
+    const { accessToken, broker, apiKey } = await getValidAccessToken(accountId);
 
     if (broker === 'DHAN') {
       const response = await fetch('https://api.dhan.co/v2/positions', {
@@ -55,6 +55,45 @@ export async function GET(request: Request) {
           pnl: Number(pnl.toFixed(2)),
           realized: Number(realized.toFixed(2)),
           unrealized: Number(unrealized.toFixed(2)),
+        };
+      });
+
+      return NextResponse.json(positions);
+    } else if (broker === 'ANGELONE') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for AngelOne account.');
+      }
+
+      const response = await fetch('https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/getPosition', {
+        method: 'GET',
+        headers: getAngelOneHeaders(apiKey, accessToken),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.status) {
+        throw new Error(data.message || 'Failed to fetch positions from AngelOne');
+      }
+
+      const positionsList = Array.isArray(data.data) ? data.data : [];
+
+      const positions = positionsList.map((item: any) => {
+        const netQty = Number(item.netqty || 0);
+        const buyPrice = Number(item.buyprice || 0);
+        const sellPrice = Number(item.sellprice || 0);
+        const ltp = Number(item.ltp || 0);
+        const pnl = Number(item.pnl || 0);
+
+        return {
+          symbol: item.tradingsymbol || 'UNKNOWN',
+          exchange: item.exchange || 'NSE',
+          productType: item.producttype || 'INTRADAY',
+          quantity: netQty,
+          buyPrice: buyPrice,
+          sellPrice: sellPrice,
+          ltp: ltp,
+          pnl: pnl,
+          realized: 0,
+          unrealized: pnl,
         };
       });
 

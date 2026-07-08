@@ -662,6 +662,9 @@ export default function Dashboard() {
             <button className="sync-btn" onClick={() => handleSyncSymbols('DHAN')} disabled={isSyncing}>
               Sync Dhan Master
             </button>
+            <button className="sync-btn" onClick={() => handleSyncSymbols('ANGELONE')} disabled={isSyncing}>
+              Sync AngelOne Master
+            </button>
           </div>
         </div>
 

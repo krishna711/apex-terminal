@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
 
 export async function GET(request: Request) {
   try {
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Account ID is required' }, { status: 400 });
     }
 
-    const { accessToken, broker } = await getValidAccessToken(accountId);
+    const { accessToken, broker, apiKey } = await getValidAccessToken(accountId);
 
     if (broker === 'DHAN') {
       const response = await fetch('https://api.dhan.co/v2/fundlimit', {
@@ -32,6 +32,28 @@ export async function GET(request: Request) {
         utilizedMargin: data.utilizedAmount || 0,
         collateralValue: data.collateralAmount || 0,
         withdrawableBalance: data.withdrawableBalance || 0,
+        raw: data,
+      });
+    } else if (broker === 'ANGELONE') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for AngelOne account.');
+      }
+
+      const response = await fetch('https://apiconnect.angelone.in/rest/secure/angelbroking/user/v1/getFundsAndLimits', {
+        method: 'GET',
+        headers: getAngelOneHeaders(apiKey, accessToken),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.status || !data.data) {
+        throw new Error(data.message || 'Failed to fetch funds from AngelOne');
+      }
+
+      return NextResponse.json({
+        availableBalance: Number(data.data.net || 0),
+        utilizedMargin: Math.abs(Number(data.data.utilized || 0)) || 0,
+        collateralValue: Number(data.data.collateral || 0) || 0,
+        withdrawableBalance: Number(data.data.net || 0),
         raw: data,
       });
     }

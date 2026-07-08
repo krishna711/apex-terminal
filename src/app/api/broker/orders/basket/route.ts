@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
 import { prisma } from '@/lib/db';
 
 interface OrderLeg {
@@ -22,10 +22,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Account ID and a list of order legs are required' }, { status: 400 });
     }
 
-    const { accessToken, broker, clientId } = await getValidAccessToken(accountId);
+    const { accessToken, broker, clientId, apiKey } = await getValidAccessToken(accountId);
 
-    if (broker !== 'DHAN') {
-      return NextResponse.json({ error: 'Basket orders currently only supported for Dhan in this phase.' }, { status: 400 });
+    if (broker !== 'DHAN' && broker !== 'ANGELONE') {
+      return NextResponse.json({ error: 'Basket orders currently only supported for Dhan and AngelOne.' }, { status: 400 });
     }
 
     // Partition legs into BUY and SELL
@@ -36,67 +36,122 @@ export async function POST(request: Request) {
     const sellResults: any[] = [];
 
     // Helper function to place a single order leg
-    const placeDhanOrder = async (leg: OrderLeg) => {
+    const placeLegOrder = async (leg: OrderLeg) => {
       // 1. Look up Symbol
       const symRecord = await prisma.symbol.findFirst({
         where: {
-          broker: 'DHAN',
+          broker: broker,
           symbol: leg.symbol.toUpperCase(),
           exchange: leg.exchange.toUpperCase(),
         },
       });
 
       if (!symRecord) {
-        throw new Error(`Symbol '${leg.symbol}' on ${leg.exchange} not found in master database.`);
+        throw new Error(`Symbol '${leg.symbol}' on ${leg.exchange} not found in ${broker} Master database.`);
       }
 
-      // 2. Prepare payload
-      const payload = {
-        dhanClientId: clientId,
-        correlationId: `bskt_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        transactionType: leg.transactionType.toUpperCase(),
-        exchangeSegment: symRecord.exchange, // Use stored segment (NSE_EQ, NSE_FNO, etc.)
-        productType: leg.productType.toUpperCase(),
-        orderType: leg.orderType.toUpperCase(),
-        validity: 'DAY',
-        securityId: symRecord.token,
-        quantity: Number(leg.quantity),
-        price: leg.orderType.toUpperCase() === 'LIMIT' ? Number(leg.price) : 0,
-        triggerPrice: (leg.orderType.toUpperCase() === 'SL' || leg.orderType.toUpperCase() === 'SL-M') ? Number(leg.triggerPrice || 0) : 0,
-        disclosedQuantity: 0,
-        afterMarketOrder: false,
-        amoTime: 'OPEN',
-      };
+      if (broker === 'DHAN') {
+        // Prepare Dhan payload
+        const payload = {
+          dhanClientId: clientId,
+          correlationId: `bskt_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          transactionType: leg.transactionType.toUpperCase(),
+          exchangeSegment: symRecord.exchange, // Use stored segment (NSE_EQ, NSE_FNO, etc.)
+          productType: leg.productType.toUpperCase(),
+          orderType: leg.orderType.toUpperCase(),
+          validity: 'DAY',
+          securityId: symRecord.token,
+          quantity: Number(leg.quantity),
+          price: leg.orderType.toUpperCase() === 'LIMIT' ? Number(leg.price) : 0,
+          triggerPrice: (leg.orderType.toUpperCase() === 'SL' || leg.orderType.toUpperCase() === 'SL-M') ? Number(leg.triggerPrice || 0) : 0,
+          disclosedQuantity: 0,
+          afterMarketOrder: false,
+          amoTime: 'OPEN',
+        };
 
-      console.log('[Basket Execution] Placing leg payload:', payload);
+        console.log('[Basket Dhan Leg] Placing payload:', payload);
 
-      const res = await fetch('https://api.dhan.co/v2/orders', {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'access-token': accessToken,
-        },
-        body: JSON.stringify(payload),
-      });
+        const res = await fetch('https://api.dhan.co/v2/orders', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'access-token': accessToken,
+          },
+          body: JSON.stringify(payload),
+        });
 
-      const data = await res.json();
-      if (!res.ok || data.status === 'failure' || data.errorType) {
-        throw new Error(data.errorMessage || data.remarks || data.message || `Order placement failed for ${leg.symbol}`);
+        const data = await res.json();
+        if (!res.ok || data.status === 'failure' || data.errorType) {
+          throw new Error(data.errorMessage || data.remarks || data.message || `Order placement failed for ${leg.symbol}`);
+        }
+
+        return {
+          symbol: leg.symbol,
+          orderId: data.orderId,
+          status: data.orderStatus || 'SUCCESS',
+        };
+      } else {
+        // AngelOne
+        if (!apiKey) {
+          throw new Error('API Key is missing for AngelOne account.');
+        }
+
+        // Map Product Type (Delivery for Equities, Carryforward for F&O)
+        const exch = symRecord.exchange.toUpperCase();
+        let mappedProduct = 'INTRADAY';
+        if (leg.productType.toUpperCase() === 'CNC') {
+          mappedProduct = (exch === 'NSE' || exch === 'BSE') ? 'DELIVERY' : 'CARRYFORWARD';
+        }
+
+        // Map Order Type
+        let mappedOrderType = 'MARKET';
+        const ot = leg.orderType.toUpperCase();
+        if (ot === 'LIMIT') mappedOrderType = 'LIMIT';
+        else if (ot === 'SL') mappedOrderType = 'STOPLOSS_LIMIT';
+        else if (ot === 'SL-M') mappedOrderType = 'STOPLOSS_MARKET';
+
+        const payload = {
+          variety: 'NORMAL',
+          tradingsymbol: symRecord.symbol,
+          symboltoken: symRecord.token,
+          transactiontype: leg.transactionType.toUpperCase(),
+          exchange: symRecord.exchange,
+          ordertype: mappedOrderType,
+          producttype: mappedProduct,
+          duration: 'DAY',
+          price: (mappedOrderType === 'LIMIT' || mappedOrderType === 'STOPLOSS_LIMIT') ? Number(leg.price) : 0,
+          triggerprice: (mappedOrderType === 'STOPLOSS_LIMIT' || mappedOrderType === 'STOPLOSS_MARKET') ? Number(leg.triggerPrice || 0) : 0,
+          quantity: Number(leg.quantity),
+          disclosedquantity: 0,
+        };
+
+        console.log('[Basket AngelOne Leg] Placing payload:', payload);
+
+        const res = await fetch('https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/placeOrder', {
+          method: 'POST',
+          headers: getAngelOneHeaders(apiKey, accessToken),
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.status || !data.data) {
+          throw new Error(data.message || `Order placement failed for ${leg.symbol} on AngelOne`);
+        }
+
+        return {
+          symbol: leg.symbol,
+          orderId: data.data.orderid,
+          status: 'SUCCESS',
+        };
       }
-
-      return {
-        symbol: leg.symbol,
-        orderId: data.orderId,
-        status: data.orderStatus || 'SUCCESS',
-      };
     };
 
     // 1. EXECUTE BUY LEGS FIRST
     console.log(`[Basket Execution] Executing ${buyLegs.length} BUY legs first...`);
     for (const leg of buyLegs) {
       try {
-        const result = await placeDhanOrder(leg);
+        const result = await placeLegOrder(leg);
         buyResults.push(result);
       } catch (err: any) {
         console.error(`[Basket Execution] BUY leg failed:`, err.message);
@@ -113,7 +168,7 @@ export async function POST(request: Request) {
     console.log(`[Basket Execution] All BUY legs executed successfully. Placing ${sellLegs.length} SELL legs...`);
     for (const leg of sellLegs) {
       try {
-        const result = await placeDhanOrder(leg);
+        const result = await placeLegOrder(leg);
         sellResults.push(result);
       } catch (err: any) {
         console.error(`[Basket Execution] SELL leg failed:`, err.message);

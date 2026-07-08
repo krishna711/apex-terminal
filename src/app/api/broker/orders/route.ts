@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
 import { prisma } from '@/lib/db';
 
 // GET: Retrieve daily orders
@@ -12,7 +12,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Account ID is required' }, { status: 400 });
     }
 
-    const { accessToken, broker } = await getValidAccessToken(accountId);
+    const { accessToken, broker, apiKey } = await getValidAccessToken(accountId);
 
     if (broker === 'DHAN') {
       const response = await fetch('https://api.dhan.co/v2/orders', {
@@ -49,6 +49,45 @@ export async function GET(request: Request) {
       }));
 
       return NextResponse.json(orders);
+    } else if (broker === 'ANGELONE') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for AngelOne account.');
+      }
+
+      const response = await fetch('https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/getOrderBook', {
+        method: 'GET',
+        headers: getAngelOneHeaders(apiKey, accessToken),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.status || !data.data) {
+        throw new Error(data.message || 'Failed to fetch orders from AngelOne');
+      }
+
+      const ordersList = Array.isArray(data.data) ? data.data : [];
+
+      const orders = ordersList.map((item: any) => {
+        let mappedStatus = 'PENDING';
+        const st = (item.status || '').toLowerCase();
+        if (st === 'complete') mappedStatus = 'TRADED';
+        else if (st === 'rejected') mappedStatus = 'REJECTED';
+        else if (st === 'cancelled') mappedStatus = 'CANCELLED';
+
+        return {
+          orderId: item.orderid,
+          time: item.updatetime || item.ordertime || '',
+          symbol: item.tradingsymbol || 'UNKNOWN',
+          exchange: item.exchange || 'NSE',
+          transactionType: item.transactiontype || 'BUY',
+          orderType: item.ordertype || 'MARKET',
+          productType: item.producttype || 'INTRADAY',
+          quantity: Number(item.quantity || 0),
+          price: Number(item.price || 0),
+          status: mappedStatus,
+        };
+      });
+
+      return NextResponse.json(orders);
     }
 
     return NextResponse.json({ error: 'Unsupported broker' }, { status: 400 });
@@ -69,7 +108,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required order parameters' }, { status: 400 });
     }
 
-    const { accessToken, broker, clientId } = await getValidAccessToken(accountId);
+    const { accessToken, broker, clientId, apiKey } = await getValidAccessToken(accountId);
 
     if (broker === 'DHAN') {
       // 1. Look up Dhan Security ID in our SQLite database
@@ -127,6 +166,74 @@ export async function POST(request: Request) {
         message: 'Order placed successfully on Dhan',
         raw: data,
       });
+    } else if (broker === 'ANGELONE') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for AngelOne account.');
+      }
+
+      // 1. Look up AngelOne token in database
+      const symRecord = await prisma.symbol.findFirst({
+        where: {
+          broker: 'ANGELONE',
+          symbol: symbol.toUpperCase(),
+          exchange: exchange.toUpperCase(),
+        },
+      });
+
+      if (!symRecord) {
+        return NextResponse.json({ error: `Symbol '${symbol}' on ${exchange} not found in AngelOne Master.` }, { status: 404 });
+      }
+
+      // 2. Map Product Type (Delivery for Equities, Carryforward for F&O)
+      const exch = symRecord.exchange.toUpperCase();
+      let mappedProduct = 'INTRADAY';
+      if (productType.toUpperCase() === 'CNC') {
+        mappedProduct = (exch === 'NSE' || exch === 'BSE') ? 'DELIVERY' : 'CARRYFORWARD';
+      }
+
+      // 3. Map Order Type
+      let mappedOrderType = 'MARKET';
+      const ot = orderType.toUpperCase();
+      if (ot === 'LIMIT') mappedOrderType = 'LIMIT';
+      else if (ot === 'SL') mappedOrderType = 'STOPLOSS_LIMIT';
+      else if (ot === 'SL-M') mappedOrderType = 'STOPLOSS_MARKET';
+
+      // 4. Build payload
+      const payload = {
+        variety: 'NORMAL',
+        tradingsymbol: symRecord.symbol,
+        symboltoken: symRecord.token,
+        transactiontype: transactionType.toUpperCase(),
+        exchange: symRecord.exchange,
+        ordertype: mappedOrderType,
+        producttype: mappedProduct,
+        duration: 'DAY',
+        price: (mappedOrderType === 'LIMIT' || mappedOrderType === 'STOPLOSS_LIMIT') ? Number(price) : 0,
+        triggerprice: (mappedOrderType === 'STOPLOSS_LIMIT' || mappedOrderType === 'STOPLOSS_MARKET') ? Number(triggerPrice) : 0,
+        quantity: Number(quantity),
+        disclosedquantity: 0,
+      };
+
+      console.log('[AngelOne Order] Placing order payload:', payload);
+
+      const response = await fetch('https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/placeOrder', {
+        method: 'POST',
+        headers: getAngelOneHeaders(apiKey, accessToken),
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.status || !data.data) {
+        console.error('[AngelOne Order] Placement failed:', data);
+        throw new Error(data.message || 'Order placement failed on AngelOne');
+      }
+
+      return NextResponse.json({
+        success: true,
+        orderId: data.data.orderid,
+        message: 'Order placed successfully on AngelOne',
+        raw: data,
+      });
     }
 
     return NextResponse.json({ error: 'Unsupported broker' }, { status: 400 });
@@ -148,7 +255,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Account ID and Order ID are required' }, { status: 400 });
     }
 
-    const { accessToken, broker } = await getValidAccessToken(accountId);
+    const { accessToken, broker, apiKey } = await getValidAccessToken(accountId);
 
     if (broker === 'DHAN') {
       const response = await fetch(`https://api.dhan.co/v2/orders/${orderId}`, {
@@ -168,6 +275,30 @@ export async function DELETE(request: Request) {
         success: true,
         orderId: data.orderId,
         message: 'Order cancelled successfully on Dhan',
+      });
+    } else if (broker === 'ANGELONE') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for AngelOne account.');
+      }
+
+      const response = await fetch('https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/cancelOrder', {
+        method: 'POST', // AngelOne cancelOrder API uses POST method
+        headers: getAngelOneHeaders(apiKey, accessToken),
+        body: JSON.stringify({
+          variety: 'NORMAL',
+          orderid: orderId,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.status) {
+        throw new Error(data.message || 'Order cancellation failed on AngelOne');
+      }
+
+      return NextResponse.json({
+        success: true,
+        orderId: data.data.orderid || orderId,
+        message: 'Order cancelled successfully on AngelOne',
       });
     }
 

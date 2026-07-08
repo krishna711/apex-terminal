@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
 
 export async function GET(request: Request) {
   try {
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Account ID is required' }, { status: 400 });
     }
 
-    const { accessToken, broker } = await getValidAccessToken(accountId);
+    const { accessToken, broker, apiKey } = await getValidAccessToken(accountId);
 
     if (broker === 'DHAN') {
       const response = await fetch('https://api.dhan.co/v2/trades', {
@@ -42,6 +42,35 @@ export async function GET(request: Request) {
         transactionType: item.transactionType || 'BUY',
         quantity: item.tradedQuantity || 0,
         price: item.tradedPrice || 0,
+      }));
+
+      return NextResponse.json(trades);
+    } else if (broker === 'ANGELONE') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for AngelOne account.');
+      }
+
+      const response = await fetch('https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/getTradeBook', {
+        method: 'GET',
+        headers: getAngelOneHeaders(apiKey, accessToken),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.status) {
+        throw new Error(data.message || 'Failed to fetch trade book from AngelOne');
+      }
+
+      const tradesList = Array.isArray(data.data) ? data.data : [];
+
+      const trades = tradesList.map((item: any) => ({
+        tradeId: item.uniqueorderid || item.orderid,
+        orderId: item.orderid,
+        time: item.filltime || '',
+        symbol: item.tradingsymbol || 'UNKNOWN',
+        exchange: item.exchange || 'NSE',
+        transactionType: item.transactiontype || 'BUY',
+        quantity: Number(item.fillsize || 0),
+        price: Number(item.fillprice || 0),
       }));
 
       return NextResponse.json(trades);
