@@ -81,10 +81,64 @@ export async function POST(request: Request) {
       });
 
     } else if (broker === 'ANGELONE') {
-      // Skeleton for AngelOne login (to be fully implemented in phase 2)
+      const password = decrypt(account.password);
+      const totpSecret = decrypt(account.totpSecret);
+
+      if (!password || !totpSecret || !account.apiKey) {
+        return NextResponse.json({ error: 'Account details are missing MPIN, TOTP secret, or API Key' }, { status: 400 });
+      }
+
+      const totpCode = generateTOTP(totpSecret);
+      if (!totpCode) {
+        return NextResponse.json({ error: 'Failed to generate TOTP code' }, { status: 500 });
+      }
+
+      console.log(`[AngelOne Login] Attempting login for client ${account.clientId} using TOTP`);
+
+      const response = await fetch('https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-UserType': 'USER',
+          'X-SourceID': 'WEB',
+          'X-ClientLocalIP': '192.168.1.1',
+          'X-ClientPublicIP': '106.193.147.98',
+          'X-MACAddress': 'FE:80:00:00:00:00',
+          'X-PrivateKey': account.apiKey,
+        },
+        body: JSON.stringify({
+          clientcode: account.clientId,
+          password: password,
+          totp: totpCode,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.status || !data.data) {
+        console.error('[AngelOne Login] Authentication failed:', data);
+        return NextResponse.json({ 
+          error: data.message || 'Authentication failed from AngelOne' 
+        }, { status: 400 });
+      }
+
+      // Update account with access token, feed token, and midnight expiration
+      const midnight = getMidnight();
+      await prisma.account.update({
+        where: { id },
+        data: {
+          accessToken: data.data.jwtToken,
+          feedToken: data.data.feedToken,
+          lastLogin: new Date(),
+          tokenExpiredAt: midnight,
+        },
+      });
+
       return NextResponse.json({ 
-        error: 'AngelOne integration is planned for Phase 2. Please start with Dhan first.' 
-      }, { status: 501 });
+        success: true, 
+        message: `Successfully logged into AngelOne. Token valid until midnight.`
+      });
 
     } else if (broker === 'FYERS') {
       // Skeleton for Fyers login (to be fully implemented in phase 3)
