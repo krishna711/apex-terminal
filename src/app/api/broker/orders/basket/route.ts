@@ -1,0 +1,140 @@
+import { NextResponse } from 'next/server';
+import { getValidAccessToken } from '@/lib/broker';
+import { prisma } from '@/lib/db';
+
+interface OrderLeg {
+  symbol: string;
+  exchange: string;
+  transactionType: 'BUY' | 'SELL';
+  orderType: 'MARKET' | 'LIMIT' | 'SL' | 'SL-M';
+  productType: string;
+  quantity: number;
+  price: number;
+  triggerPrice?: number;
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { accountId, legs } = body as { accountId: string; legs: OrderLeg[] };
+
+    if (!accountId || !legs || !Array.isArray(legs) || legs.length === 0) {
+      return NextResponse.json({ error: 'Account ID and a list of order legs are required' }, { status: 400 });
+    }
+
+    const { accessToken, broker, clientId } = await getValidAccessToken(accountId);
+
+    if (broker !== 'DHAN') {
+      return NextResponse.json({ error: 'Basket orders currently only supported for Dhan in this phase.' }, { status: 400 });
+    }
+
+    // Partition legs into BUY and SELL
+    const buyLegs = legs.filter(leg => leg.transactionType.toUpperCase() === 'BUY');
+    const sellLegs = legs.filter(leg => leg.transactionType.toUpperCase() === 'SELL');
+
+    const buyResults: any[] = [];
+    const sellResults: any[] = [];
+
+    // Helper function to place a single order leg
+    const placeDhanOrder = async (leg: OrderLeg) => {
+      // 1. Look up Symbol
+      const symRecord = await prisma.symbol.findFirst({
+        where: {
+          broker: 'DHAN',
+          symbol: leg.symbol.toUpperCase(),
+          exchange: leg.exchange.toUpperCase(),
+        },
+      });
+
+      if (!symRecord) {
+        throw new Error(`Symbol '${leg.symbol}' on ${leg.exchange} not found in master database.`);
+      }
+
+      // 2. Prepare payload
+      const payload = {
+        dhanClientId: clientId,
+        correlationId: `bskt_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        transactionType: leg.transactionType.toUpperCase(),
+        exchangeSegment: symRecord.exchange, // Use stored segment (NSE_EQ, NSE_FNO, etc.)
+        productType: leg.productType.toUpperCase(),
+        orderType: leg.orderType.toUpperCase(),
+        validity: 'DAY',
+        securityId: symRecord.token,
+        quantity: Number(leg.quantity),
+        price: leg.orderType.toUpperCase() === 'LIMIT' ? Number(leg.price) : 0,
+        triggerPrice: (leg.orderType.toUpperCase() === 'SL' || leg.orderType.toUpperCase() === 'SL-M') ? Number(leg.triggerPrice || 0) : 0,
+        disclosedQuantity: 0,
+        afterMarketOrder: false,
+        amoTime: 'OPEN',
+      };
+
+      console.log('[Basket Execution] Placing leg payload:', payload);
+
+      const res = await fetch('https://api.dhan.co/v2/orders', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'access-token': accessToken,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.status === 'failure') {
+        throw new Error(data.remarks || data.message || `Order placement failed for ${leg.symbol}`);
+      }
+
+      return {
+        symbol: leg.symbol,
+        orderId: data.orderId,
+        status: data.orderStatus || 'SUCCESS',
+      };
+    };
+
+    // 1. EXECUTE BUY LEGS FIRST
+    console.log(`[Basket Execution] Executing ${buyLegs.length} BUY legs first...`);
+    for (const leg of buyLegs) {
+      try {
+        const result = await placeDhanOrder(leg);
+        buyResults.push(result);
+      } catch (err: any) {
+        console.error(`[Basket Execution] BUY leg failed:`, err.message);
+        return NextResponse.json({
+          success: false,
+          error: `BUY leg failed: ${err.message}. Order execution stopped.`,
+          buyResults,
+          sellResults, // will be empty since we stop
+        }, { status: 400 });
+      }
+    }
+
+    // 2. EXECUTE SELL LEGS SECOND (ONLY if all BUY legs succeeded)
+    console.log(`[Basket Execution] All BUY legs executed successfully. Placing ${sellLegs.length} SELL legs...`);
+    for (const leg of sellLegs) {
+      try {
+        const result = await placeDhanOrder(leg);
+        sellResults.push(result);
+      } catch (err: any) {
+        console.error(`[Basket Execution] SELL leg failed:`, err.message);
+        return NextResponse.json({
+          success: false,
+          error: `SELL leg failed: ${err.message}. (BUY legs executed successfully).`,
+          buyResults,
+          sellResults,
+        }, { status: 400 });
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Basket executed successfully. ${buyLegs.length} BUY legs and ${sellLegs.length} SELL legs placed.`,
+      buyResults,
+      sellResults,
+    });
+
+  } catch (error: any) {
+    console.error('[Basket Execution] System error:', error);
+    return NextResponse.json({ error: error.message || 'Basket execution failed.' }, { status: 500 });
+  }
+}

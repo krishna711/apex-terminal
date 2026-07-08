@@ -1,0 +1,37 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Account {
+  id              String    @id @default(uuid())
+  name            String
+  broker          String    // "DHAN", "FYERS", "ANGELONE"
+  clientId        String    // Client Code / UCC
+  apiKey          String?
+  apiSecret       String?
+  password        String?   // Encrypted PIN / password
+  totpSecret      String?   // Encrypted TOTP secret
+  accessToken     String?
+  feedToken       String?   // Specifically for AngelOne feed/websocket
+  lastLogin       DateTime?
+  tokenExpiredAt  DateTime? // Timestamp for midnight expiry of the token
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Symbol {
+  id        String @id @default(uuid())
+  broker    String // "DHAN" or "ANGELONE"
+  symbol    String // e.g. "INFY-EQ" or "INFY"
+  token     String // The security ID or exchange token
+  exchange  String // e.g. "NSE", "BSE"
+  name      String
+
+  @@index([broker, symbol])
+  @@index([broker, exchange, symbol])
+}
