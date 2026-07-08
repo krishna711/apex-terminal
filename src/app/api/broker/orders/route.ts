@@ -116,9 +116,9 @@ export async function POST(request: Request) {
       });
 
       const data = await response.json();
-      if (!response.ok || data.status === 'failure') {
+      if (!response.ok || data.status === 'failure' || data.errorType) {
         console.error('[Dhan Order] Placement failed:', data);
-        throw new Error(data.remarks || data.message || 'Order placement failed from Dhan');
+        throw new Error(data.errorMessage || data.remarks || data.message || 'Order placement failed from Dhan');
       }
 
       return NextResponse.json({

@@ -81,8 +81,8 @@ export async function POST(request: Request) {
       });
 
       const data = await res.json();
-      if (!res.ok || data.status === 'failure') {
-        throw new Error(data.remarks || data.message || `Order placement failed for ${leg.symbol}`);
+      if (!res.ok || data.status === 'failure' || data.errorType) {
+        throw new Error(data.errorMessage || data.remarks || data.message || `Order placement failed for ${leg.symbol}`);
       }
 
       return {
