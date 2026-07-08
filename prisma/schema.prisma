@@ -35,3 +35,10 @@ model Symbol {
   @@index([broker, symbol])
   @@index([broker, exchange, symbol])
 }
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String   // bcrypt hashed password
+  createdAt DateTime @default(now())
+}

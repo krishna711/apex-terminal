@@ -17,7 +17,8 @@ import {
   AlertCircle,
   Clock,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  LogOut
 } from 'lucide-react';
 
 interface Account {
@@ -508,6 +509,22 @@ export default function Dashboard() {
     }
   };
 
+  // Logout handler
+  const handleLogout = async () => {
+    try {
+      const res = await fetch('/api/auth/logout', {
+        method: 'POST',
+      });
+      if (res.ok) {
+        window.location.href = '/login';
+      } else {
+        showError('Logout failed.');
+      }
+    } catch (err) {
+      showError('Network error during logout.');
+    }
+  };
+
   const activeAccount = accounts.find(a => a.id === selectedAccountId);
 
   // Helper to compute Portfolio stats
@@ -604,10 +621,31 @@ export default function Dashboard() {
           )}
         </div>
 
-        <div className="sidebar-footer">
+        <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <button className="btn-primary-wide" onClick={() => setShowAddModal(true)}>
             <Plus size={16} />
             Add Account
+          </button>
+          <button 
+            className="btn-secondary" 
+            style={{ 
+              width: '100%', 
+              background: 'rgba(239, 68, 68, 0.1)', 
+              border: '1px solid rgba(239, 68, 68, 0.3)', 
+              color: '#fca5a5', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              gap: '0.5rem',
+              padding: '0.75rem 1rem',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 600
+            }}
+            onClick={handleLogout}
+          >
+            <LogOut size={16} />
+            Logout
           </button>
         </div>
       </aside>
