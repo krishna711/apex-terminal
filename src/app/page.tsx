@@ -192,6 +192,13 @@ export default function Dashboard() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Re-trigger search when selected segment/exchange changes
+  useEffect(() => {
+    if (symbolInput.length >= 2) {
+      handleSymbolSearch(symbolInput);
+    }
+  }, [exchange]);
+
   // Handle symbol autocomplete lookup
   const handleSymbolSearch = async (val: string) => {
     setSymbolInput(val);
@@ -206,7 +213,7 @@ export default function Dashboard() {
     const broker = activeAcc?.broker || 'DHAN';
 
     try {
-      const res = await fetch(`/api/broker/symbols?broker=${broker}&q=${val}`);
+      const res = await fetch(`/api/broker/symbols?broker=${broker}&exchange=${exchange}&q=${val}`);
       if (res.ok) {
         const data = await res.json();
         setSymbolSuggestions(data);
