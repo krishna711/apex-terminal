@@ -1357,7 +1357,7 @@ export default function Dashboard() {
                   onChange={(e) => setNewAccBroker(e.target.value as any)}
                 >
                   <option value="DHAN">Dhan</option>
-                  <option value="ANGELONE">AngelOne (Planned)</option>
+                  <option value="ANGELONE">AngelOne</option>
                   <option value="FYERS">Fyers (Planned)</option>
                 </select>
               </div>
@@ -1373,6 +1373,34 @@ export default function Dashboard() {
                   required
                 />
               </div>
+
+              {(newAccBroker === 'ANGELONE' || newAccBroker === 'FYERS') && (
+                <div className="form-group">
+                  <label>API Key</label>
+                  <input 
+                    type="password" 
+                    className="form-control" 
+                    placeholder="SmartAPI / Developer API Key" 
+                    value={newAccApiKey}
+                    onChange={(e) => setNewAccApiKey(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
+
+              {newAccBroker === 'FYERS' && (
+                <div className="form-group">
+                  <label>API Secret Key</label>
+                  <input 
+                    type="password" 
+                    className="form-control" 
+                    placeholder="App API Secret Key" 
+                    value={newAccApiSecret}
+                    onChange={(e) => setNewAccApiSecret(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
 
               <div className="form-group">
                 <label>Numeric PIN / Password</label>
