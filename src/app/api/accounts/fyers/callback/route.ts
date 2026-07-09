@@ -47,7 +47,7 @@ export async function GET(request: Request) {
     console.log(`[Fyers Callback] Exchanging auth code for account: ${account.name}`);
 
     // Call Fyers validate-authcode endpoint
-    const response = await fetch('https://api.fyers.in/api/v3/validate-authcode', {
+    const response = await fetch('https://api-t1.fyers.in/api/v3/validate-authcode', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

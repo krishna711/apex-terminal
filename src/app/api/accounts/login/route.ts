@@ -150,7 +150,7 @@ export async function POST(request: Request) {
       const protocol = host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
       const callbackUrl = `${protocol}://${host}/api/accounts/fyers/callback`;
 
-      const fyersAuthUrl = `https://api.fyers.in/api/v3/generate-authcode?client_id=${account.apiKey}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&state=${id}`;
+      const fyersAuthUrl = `https://api-t1.fyers.in/api/v3/generate-authcode?client_id=${account.apiKey}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&state=${id}`;
 
       console.log(`[Fyers Login] Generated OAuth URL: ${fyersAuthUrl}`);
 
