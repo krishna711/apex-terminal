@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders, getFyersHeaders } from '@/lib/broker';
 
 export async function GET(request: Request) {
   try {
@@ -94,6 +94,50 @@ export async function GET(request: Request) {
           pnl: pnl,
           realized: 0,
           unrealized: pnl,
+        };
+      });
+
+      return NextResponse.json(positions);
+    } else if (broker === 'FYERS') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for Fyers account.');
+      }
+
+      const response = await fetch('https://api-t1.fyers.in/api/v3/positions', {
+        method: 'GET',
+        headers: getFyersHeaders(apiKey, accessToken),
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.s !== 'ok' || !data.netPositions) {
+        throw new Error(data.message || 'Failed to fetch positions from Fyers');
+      }
+
+      const positionsList = Array.isArray(data.netPositions) ? data.netPositions : [];
+
+      const positions = positionsList.map((item: any) => {
+        const netQty = Number(item.netQty || 0);
+        const buyAvg = Number(item.buyAvg || 0);
+        const sellAvg = Number(item.sellAvg || 0);
+        const ltp = Number(item.ltp || 0);
+        const pnl = Number(item.pl || 0);
+        const realized = Number(item.realized_pnl || 0);
+        const unrealized = Number(item.unrealized_pnl || 0);
+
+        // Fyers symbols look like "NSE:SBIN-EQ". Clean the name to e.g. "SBIN"
+        const cleanSymbol = (item.symbol || 'UNKNOWN').split(':').pop()?.replace('-EQ', '') || item.symbol;
+
+        return {
+          symbol: cleanSymbol,
+          exchange: (item.symbol || '').startsWith('BSE') ? 'BSE' : 'NSE',
+          productType: item.productType || 'INTRADAY',
+          quantity: netQty,
+          buyPrice: buyAvg,
+          sellPrice: sellAvg,
+          ltp: ltp,
+          pnl: pnl,
+          realized: realized,
+          unrealized: unrealized,
         };
       });
 

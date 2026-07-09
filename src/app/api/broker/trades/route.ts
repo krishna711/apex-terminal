@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders, getFyersHeaders } from '@/lib/broker';
 
 export async function GET(request: Request) {
   try {
@@ -72,6 +72,38 @@ export async function GET(request: Request) {
         quantity: Number(item.fillsize || 0),
         price: Number(item.fillprice || 0),
       }));
+
+      return NextResponse.json(trades);
+    } else if (broker === 'FYERS') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for Fyers account.');
+      }
+
+      const response = await fetch('https://api-t1.fyers.in/api/v3/tradebook', {
+        method: 'GET',
+        headers: getFyersHeaders(apiKey, accessToken),
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.s !== 'ok' || !data.tradeBook) {
+        throw new Error(data.message || 'Failed to fetch trade book from Fyers');
+      }
+
+      const tradesList = Array.isArray(data.tradeBook) ? data.tradeBook : [];
+
+      const trades = tradesList.map((item: any) => {
+        const cleanSymbol = (item.symbol || 'UNKNOWN').split(':').pop()?.replace('-EQ', '') || item.symbol;
+        return {
+          tradeId: item.id || item.orderId,
+          orderId: item.orderId,
+          time: item.tradeTime || '',
+          symbol: cleanSymbol,
+          exchange: (item.symbol || '').startsWith('BSE') ? 'BSE' : 'NSE',
+          transactionType: item.transactionType === 1 ? 'BUY' : 'SELL',
+          quantity: Number(item.qty || 0),
+          price: Number(item.tradePrice || 0),
+        };
+      });
 
       return NextResponse.json(trades);
     }

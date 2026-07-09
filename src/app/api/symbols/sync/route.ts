@@ -5,8 +5,8 @@ export async function POST(request: Request) {
   try {
     const { broker } = await request.json();
 
-    if (!broker || (broker !== 'DHAN' && broker !== 'ANGELONE')) {
-      return NextResponse.json({ error: 'Valid broker (DHAN or ANGELONE) is required' }, { status: 400 });
+    if (!broker || (broker !== 'DHAN' && broker !== 'ANGELONE' && broker !== 'FYERS')) {
+      return NextResponse.json({ error: 'Valid broker (DHAN, ANGELONE, or FYERS) is required' }, { status: 400 });
     }
 
     if (broker === 'DHAN') {
@@ -157,6 +157,72 @@ export async function POST(request: Request) {
       return NextResponse.json({
         success: true,
         message: `Successfully synced ${symbolsToInsert.length} AngelOne equity symbols.`,
+      });
+    } else if (broker === 'FYERS') {
+      console.log('[Symbol Sync] Fetching Fyers symbol masters...');
+      
+      const urls = [
+        { url: 'https://public.fyers.in/sym_details/NSE_CM_sym_master.json', exch: 'NSE' },
+        { url: 'https://public.fyers.in/sym_details/BSE_CM_sym_master.json', exch: 'BSE' },
+        { url: 'https://public.fyers.in/sym_details/NSE_FO_sym_master.json', exch: 'NFO' }
+      ];
+
+      const symbolsToInsert: any[] = [];
+      const seen = new Set<string>();
+
+      for (const item of urls) {
+        console.log(`[Symbol Sync] Fetching ${item.exch} master...`);
+        const res = await fetch(item.url);
+        if (!res.ok) {
+          console.warn(`[Symbol Sync] Failed to fetch Fyers ${item.exch} master: ${res.statusText}`);
+          continue;
+        }
+
+        const data = await res.json();
+        const entries = Object.entries(data);
+        console.log(`[Symbol Sync] Parsed ${entries.length} items for ${item.exch}`);
+
+        for (const [key, val] of entries) {
+          const itemVal = val as any;
+          const exSymbol = itemVal.exSymbol || '';
+          if (!exSymbol) continue;
+
+          // For Fyers, the key is the exact ticker string (e.g. "NSE:SBIN-EQ" or "NSE:NIFTY26JUL22000CE")
+          // We store this ticker string in the "token" field.
+          const symbolKey = `${item.exch}:${exSymbol}`;
+          if (!seen.has(symbolKey)) {
+            seen.add(symbolKey);
+            symbolsToInsert.push({
+              broker: 'FYERS',
+              symbol: exSymbol.toUpperCase(),
+              token: key,
+              exchange: item.exch,
+              name: itemVal.symbolDesc || itemVal.exSymName || `${exSymbol} on ${item.exch}`,
+            });
+          }
+        }
+      }
+
+      console.log(`[Symbol Sync] Found ${symbolsToInsert.length} total Fyers symbols. Clearing old data...`);
+
+      // Delete old Fyers symbols
+      await prisma.symbol.deleteMany({
+        where: { broker: 'FYERS' },
+      });
+
+      console.log('[Symbol Sync] Inserting new Fyers symbols in chunks...');
+      const chunkSize = 500;
+      for (let i = 0; i < symbolsToInsert.length; i += chunkSize) {
+        const chunk = symbolsToInsert.slice(i, i + chunkSize);
+        await prisma.symbol.createMany({
+          data: chunk,
+        });
+      }
+
+      console.log('[Symbol Sync] Fyers sync completed!');
+      return NextResponse.json({
+        success: true,
+        message: `Successfully synced ${symbolsToInsert.length} Fyers symbols.`,
       });
     }
 

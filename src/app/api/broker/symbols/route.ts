@@ -42,7 +42,7 @@ export async function GET(request: Request) {
       whereClause.exchange = { in: dbExchanges };
     }
 
-    if (broker === 'DHAN' || broker === 'ANGELONE') {
+    if (broker === 'DHAN' || broker === 'ANGELONE' || broker === 'FYERS') {
       const symbols = await prisma.symbol.findMany({
         where: {
           broker,
@@ -51,26 +51,6 @@ export async function GET(request: Request) {
         take: 20,
       });
       return NextResponse.json(symbols);
-    } else if (broker === 'FYERS') {
-      // For Fyers, search Dhan symbols and map them to Fyers' format "EXCHANGE:SYMBOL-EQ"
-      const symbols = await prisma.symbol.findMany({
-        where: {
-          broker: 'DHAN',
-          ...whereClause,
-        },
-        take: 20,
-      });
-
-      const fyersSymbols = symbols.map(s => ({
-        id: s.id,
-        broker: 'FYERS',
-        symbol: `${s.exchange}:${s.symbol}-EQ`,
-        token: `${s.exchange}:${s.symbol}-EQ`, // Fyers uses symbol as token
-        exchange: s.exchange,
-        name: s.name.replace('Equity on ', ''),
-      }));
-
-      return NextResponse.json(fyersSymbols);
     }
 
     return NextResponse.json({ error: 'Unsupported broker' }, { status: 400 });

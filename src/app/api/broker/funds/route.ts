@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders, getFyersHeaders } from '@/lib/broker';
 
 export async function GET(request: Request) {
   try {
@@ -54,6 +54,36 @@ export async function GET(request: Request) {
         utilizedMargin: Math.abs(Number(data.data.utilized || 0)) || 0,
         collateralValue: Number(data.data.collateral || 0) || 0,
         withdrawableBalance: Number(data.data.net || 0),
+        raw: data,
+      });
+    } else if (broker === 'FYERS') {
+      if (!apiKey) {
+        throw new Error('API Key (App ID) is missing for Fyers account.');
+      }
+
+      const response = await fetch('https://api-t1.fyers.in/api/v3/funds', {
+        method: 'GET',
+        headers: getFyersHeaders(apiKey, accessToken),
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.s !== 'ok' || !data.fund_limit) {
+        throw new Error(data.message || 'Failed to fetch funds from Fyers');
+      }
+
+      const limitObj = data.fund_limit.find((f: any) => f.title === 'Limit' || f.id === 10);
+      const utilizedObj = data.fund_limit.find((f: any) => f.title === 'Utilized' || f.id === 12);
+      const collateralObj = data.fund_limit.find((f: any) => f.title === 'Collateral' || f.id === 2);
+
+      const available = limitObj ? limitObj.equityAmount : 0;
+      const utilized = utilizedObj ? utilizedObj.equityAmount : 0;
+      const collateral = collateralObj ? collateralObj.equityAmount : 0;
+
+      return NextResponse.json({
+        availableBalance: Number(available),
+        utilizedMargin: Number(utilized),
+        collateralValue: Number(collateral),
+        withdrawableBalance: Number(available),
         raw: data,
       });
     }

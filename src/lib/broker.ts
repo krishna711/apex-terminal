@@ -177,3 +177,14 @@ export function getAngelOneHeaders(apiKey: string, accessToken: string) {
     'Authorization': `Bearer ${accessToken}`,
   };
 }
+
+/**
+ * Generates standard headers required for the Fyers API v3 endpoints.
+ */
+export function getFyersHeaders(apiKey: string, accessToken: string) {
+  return {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'Authorization': `${apiKey}:${accessToken}`,
+  };
+}

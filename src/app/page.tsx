@@ -118,6 +118,18 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchAccounts();
+
+    // Check for success or error query parameters from Fyers OAuth callback redirects
+    const params = new URLSearchParams(window.location.search);
+    const successParam = params.get('success');
+    const errorParam = params.get('error');
+    if (successParam) {
+      showSuccess(successParam);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (errorParam) {
+      showError(errorParam);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
   }, []);
 
   // Fetch portfolio data for the active selected account
@@ -248,6 +260,11 @@ export default function Dashboard() {
 
       const data = await res.json();
       if (res.ok) {
+        if (data.redirect && data.redirectUrl) {
+          showSuccess('Redirecting to broker sign-in page...');
+          window.location.href = data.redirectUrl;
+          return;
+        }
         showSuccess(data.message || 'Login Successful!');
         fetchAccounts(); // Reload status
       } else {
@@ -259,10 +276,10 @@ export default function Dashboard() {
   };
 
   // Sync symbols master database
-  const handleSyncSymbols = async (brokerName: 'DHAN' | 'ANGELONE') => {
+  const handleSyncSymbols = async (brokerName: 'DHAN' | 'ANGELONE' | 'FYERS') => {
     try {
       setIsSyncing(true);
-      showSuccess(`Syncing ${brokerName} equity symbols. Please wait...`);
+      showSuccess(`Syncing ${brokerName} symbols. Please wait...`);
       const res = await fetch('/api/symbols/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -664,6 +681,9 @@ export default function Dashboard() {
             </button>
             <button className="sync-btn" onClick={() => handleSyncSymbols('ANGELONE')} disabled={isSyncing}>
               Sync AngelOne Master
+            </button>
+            <button className="sync-btn" onClick={() => handleSyncSymbols('FYERS')} disabled={isSyncing}>
+              Sync Fyers Master
             </button>
           </div>
         </div>

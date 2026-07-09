@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders, getFyersHeaders } from '@/lib/broker';
 import { prisma } from '@/lib/db';
 
 interface OrderLeg {
@@ -24,8 +24,8 @@ export async function POST(request: Request) {
 
     const { accessToken, broker, clientId, apiKey } = await getValidAccessToken(accountId);
 
-    if (broker !== 'DHAN' && broker !== 'ANGELONE') {
-      return NextResponse.json({ error: 'Basket orders currently only supported for Dhan and AngelOne.' }, { status: 400 });
+    if (broker !== 'DHAN' && broker !== 'ANGELONE' && broker !== 'FYERS') {
+      return NextResponse.json({ error: 'Basket orders currently only supported for Dhan, AngelOne and Fyers.' }, { status: 400 });
     }
 
     // Partition legs into BUY and SELL
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
           orderId: data.orderId,
           status: data.orderStatus || 'SUCCESS',
         };
-      } else {
+      } else if (broker === 'ANGELONE') {
         // AngelOne
         if (!apiKey) {
           throw new Error('API Key is missing for AngelOne account.');
@@ -142,6 +142,55 @@ export async function POST(request: Request) {
         return {
           symbol: leg.symbol,
           orderId: data.data.orderid,
+          status: 'SUCCESS',
+        };
+      } else {
+        // Fyers
+        if (!apiKey) {
+          throw new Error('API Key is missing for Fyers account.');
+        }
+
+        const exch = symRecord.exchange.toUpperCase();
+        let mappedProduct = 'INTRADAY';
+        if (leg.productType.toUpperCase() === 'CNC') {
+          mappedProduct = (exch === 'NSE' || exch === 'BSE') ? 'CNC' : 'MARGIN';
+        }
+
+        let mappedType = 2; // Default to Market
+        const ot = leg.orderType.toUpperCase();
+        if (ot === 'LIMIT') mappedType = 1;
+        else if (ot === 'SL') mappedType = 3;
+        else if (ot === 'SL-M') mappedType = 4;
+
+        const payload = {
+          symbol: symRecord.token, // contains e.g. "NSE:SBIN-EQ"
+          qty: Number(leg.quantity),
+          type: mappedType,
+          side: leg.transactionType.toUpperCase() === 'BUY' ? 1 : -1,
+          productType: mappedProduct,
+          limitPrice: (mappedType === 1 || mappedType === 3) ? Number(leg.price) : 0,
+          stopPrice: (mappedType === 3 || mappedType === 4) ? Number(leg.triggerPrice || 0) : 0,
+          validity: 'DAY',
+          disclosedQty: 0,
+          offlineOrder: 'False',
+        };
+
+        console.log('[Basket Fyers Leg] Placing payload:', payload);
+
+        const res = await fetch('https://api-t1.fyers.in/api/v3/orders/sync', {
+          method: 'POST',
+          headers: getFyersHeaders(apiKey, accessToken),
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        if (!res.ok || data.s !== 'ok' || !data.id) {
+          throw new Error(data.message || `Order placement failed for ${leg.symbol} on Fyers`);
+        }
+
+        return {
+          symbol: leg.symbol,
+          orderId: data.id,
           status: 'SUCCESS',
         };
       }

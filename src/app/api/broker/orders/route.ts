@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders, getFyersHeaders } from '@/lib/broker';
 import { prisma } from '@/lib/db';
 
 // GET: Retrieve daily orders
@@ -82,6 +82,53 @@ export async function GET(request: Request) {
           orderType: item.ordertype || 'MARKET',
           productType: item.producttype || 'INTRADAY',
           quantity: Number(item.quantity || 0),
+          price: Number(item.price || 0),
+          status: mappedStatus,
+        };
+      });
+
+      return NextResponse.json(orders);
+    } else if (broker === 'FYERS') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for Fyers account.');
+      }
+
+      const response = await fetch('https://api-t1.fyers.in/api/v3/orders', {
+        method: 'GET',
+        headers: getFyersHeaders(apiKey, accessToken),
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.s !== 'ok' || !data.orderBook) {
+        throw new Error(data.message || 'Failed to fetch orders from Fyers');
+      }
+
+      const ordersList = Array.isArray(data.orderBook) ? data.orderBook : [];
+
+      const orders = ordersList.map((item: any) => {
+        let mappedStatus = 'PENDING';
+        const st = Number(item.status);
+        if (st === 2) mappedStatus = 'TRADED';
+        else if (st === 5) mappedStatus = 'REJECTED';
+        else if (st === 1) mappedStatus = 'CANCELLED';
+
+        let mappedOrderType = 'MARKET';
+        const ot = Number(item.type);
+        if (ot === 1) mappedOrderType = 'LIMIT';
+        else if (ot === 3) mappedOrderType = 'SL';
+        else if (ot === 4) mappedOrderType = 'SL-M';
+
+        const cleanSymbol = (item.symbol || 'UNKNOWN').split(':').pop()?.replace('-EQ', '') || item.symbol;
+
+        return {
+          orderId: item.id,
+          time: item.orderDateTime || '',
+          symbol: cleanSymbol,
+          exchange: (item.symbol || '').startsWith('BSE') ? 'BSE' : 'NSE',
+          transactionType: item.side === 1 ? 'BUY' : 'SELL',
+          orderType: mappedOrderType,
+          productType: item.productType || 'INTRADAY',
+          quantity: Number(item.qty || 0),
           price: Number(item.price || 0),
           status: mappedStatus,
         };
@@ -234,6 +281,72 @@ export async function POST(request: Request) {
         message: 'Order placed successfully on AngelOne',
         raw: data,
       });
+    } else if (broker === 'FYERS') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for Fyers account.');
+      }
+
+      // 1. Look up Fyers symbol in database
+      const symRecord = await prisma.symbol.findFirst({
+        where: {
+          broker: 'FYERS',
+          symbol: symbol.toUpperCase(),
+          exchange: exchange.toUpperCase(),
+        },
+      });
+
+      if (!symRecord) {
+        return NextResponse.json({ error: `Symbol '${symbol}' on ${exchange} not found in Fyers Master.` }, { status: 404 });
+      }
+
+      // 2. Map Product Type (CNC for Equities, MARGIN for Carryforward Derivatives, INTRADAY for MIS)
+      const exch = symRecord.exchange.toUpperCase();
+      let mappedProduct = 'INTRADAY';
+      if (productType.toUpperCase() === 'CNC') {
+        mappedProduct = (exch === 'NSE' || exch === 'BSE') ? 'CNC' : 'MARGIN';
+      }
+
+      // 3. Map Order Type (1: Limit, 2: Market, 3: SL, 4: SL-M)
+      let mappedType = 2; // Default to Market
+      const ot = orderType.toUpperCase();
+      if (ot === 'LIMIT') mappedType = 1;
+      else if (ot === 'SL') mappedType = 3;
+      else if (ot === 'SL-M') mappedType = 4;
+
+      // 4. Build payload
+      const payload = {
+        symbol: symRecord.token, // Store contains full Fyers symbol string e.g. "NSE:SBIN-EQ"
+        qty: Number(quantity),
+        type: mappedType,
+        side: transactionType.toUpperCase() === 'BUY' ? 1 : -1,
+        productType: mappedProduct,
+        limitPrice: (mappedType === 1 || mappedType === 3) ? Number(price) : 0,
+        stopPrice: (mappedType === 3 || mappedType === 4) ? Number(triggerPrice) : 0,
+        validity: 'DAY',
+        disclosedQty: 0,
+        offlineOrder: 'False',
+      };
+
+      console.log('[Fyers Order] Placing order payload:', payload);
+
+      const response = await fetch('https://api-t1.fyers.in/api/v3/orders/sync', {
+        method: 'POST',
+        headers: getFyersHeaders(apiKey, accessToken),
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.s !== 'ok' || !data.id) {
+        console.error('[Fyers Order] Placement failed:', data);
+        throw new Error(data.message || 'Order placement failed on Fyers');
+      }
+
+      return NextResponse.json({
+        success: true,
+        orderId: data.id,
+        message: 'Order placed successfully on Fyers',
+        raw: data,
+      });
     }
 
     return NextResponse.json({ error: 'Unsupported broker' }, { status: 400 });
@@ -299,6 +412,29 @@ export async function DELETE(request: Request) {
         success: true,
         orderId: data.data.orderid || orderId,
         message: 'Order cancelled successfully on AngelOne',
+      });
+    } else if (broker === 'FYERS') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for Fyers account.');
+      }
+
+      const response = await fetch('https://api-t1.fyers.in/api/v3/orders/sync', {
+        method: 'DELETE',
+        headers: getFyersHeaders(apiKey, accessToken),
+        body: JSON.stringify({
+          id: orderId,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.s !== 'ok' || !data.id) {
+        throw new Error(data.message || 'Order cancellation failed on Fyers');
+      }
+
+      return NextResponse.json({
+        success: true,
+        orderId: data.id || orderId,
+        message: 'Order cancelled successfully on Fyers',
       });
     }
 

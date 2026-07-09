@@ -141,10 +141,24 @@ export async function POST(request: Request) {
       });
 
     } else if (broker === 'FYERS') {
-      // Skeleton for Fyers login (to be fully implemented in phase 3)
+      if (!account.apiKey) {
+        return NextResponse.json({ error: 'Fyers App ID (API Key) is missing' }, { status: 400 });
+      }
+
+      // Determine correct redirect callback URI using request headers
+      const host = request.headers.get('host') || 'localhost:3000';
+      const protocol = host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
+      const callbackUrl = `${protocol}://${host}/api/accounts/fyers/callback`;
+
+      const fyersAuthUrl = `https://api.fyers.in/api/v3/generate-authcode?client_id=${account.apiKey}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&state=${id}`;
+
+      console.log(`[Fyers Login] Generated OAuth URL: ${fyersAuthUrl}`);
+
       return NextResponse.json({ 
-        error: 'Fyers integration is planned for Phase 3. Please start with Dhan first.' 
-      }, { status: 501 });
+        success: true, 
+        redirect: true,
+        redirectUrl: fyersAuthUrl
+      });
     }
 
     return NextResponse.json({ error: 'Unsupported broker' }, { status: 400 });

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getValidAccessToken, getAngelOneHeaders } from '@/lib/broker';
+import { getValidAccessToken, getAngelOneHeaders, getFyersHeaders } from '@/lib/broker';
 
 export async function GET(request: Request) {
   try {
@@ -83,6 +83,47 @@ export async function GET(request: Request) {
         return {
           symbol: item.tradingsymbol || 'UNKNOWN',
           exchange: item.exchange || 'NSE',
+          quantity: qty,
+          averagePrice: avgPrice,
+          currentPrice: ltp,
+          marketValue: Number(marketValue.toFixed(2)),
+          pnl: Number(pnl.toFixed(2)),
+          pnlPercentage: Number(pnlPercentage.toFixed(2)),
+        };
+      });
+
+      return NextResponse.json(holdings);
+    } else if (broker === 'FYERS') {
+      if (!apiKey) {
+        throw new Error('API Key is missing for Fyers account.');
+      }
+
+      const response = await fetch('https://api-t1.fyers.in/api/v3/holdings', {
+        method: 'GET',
+        headers: getFyersHeaders(apiKey, accessToken),
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.s !== 'ok' || !data.holdings) {
+        throw new Error(data.message || 'Failed to fetch holdings from Fyers');
+      }
+
+      const holdingsList = Array.isArray(data.holdings) ? data.holdings : [];
+
+      const holdings = holdingsList.map((item: any) => {
+        const qty = Number(item.qty || 0);
+        const avgPrice = Number(item.costPrice || 0);
+        const ltp = Number(item.ltp || avgPrice);
+        const marketValue = qty * ltp;
+        const pnl = Number(item.pl || (qty * (ltp - avgPrice)));
+        const pnlPercentage = avgPrice > 0 ? ((ltp - avgPrice) / avgPrice) * 100 : 0;
+
+        // Fyers symbols look like "NSE:SBIN-EQ". Clean the name to e.g. "SBIN"
+        const cleanSymbol = (item.symbol || 'UNKNOWN').split(':').pop()?.replace('-EQ', '') || item.symbol;
+
+        return {
+          symbol: cleanSymbol,
+          exchange: (item.symbol || '').startsWith('BSE') ? 'BSE' : 'NSE',
           quantity: qty,
           averagePrice: avgPrice,
           currentPrice: ltp,
