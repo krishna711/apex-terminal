@@ -68,12 +68,14 @@ export async function GET(request: Request) {
     console.log(`[Fyers Callback] App ID (apiKey): "${account.apiKey}"`);
     console.log(`[Fyers Callback] Decrypted secret length: ${apiSecret ? apiSecret.length : 0}`);
     console.log(`[Fyers Callback] Computed appIdHash: "${appIdHash}"`);
+    console.log(`[Fyers Callback] Extracted code: "${code ? code.slice(0, 10) + '...' + code.slice(-5) : 'null'}"`);
 
     // Construct the exact callback URL passed to Fyers during auth code generation
     const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
     const protocol = request.headers.get('x-forwarded-proto') || 
                      (host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
     const callbackUrl = `${protocol}://${host}/api/accounts/fyers/callback`;
+    console.log(`[Fyers Callback] Token request callbackUrl: "${callbackUrl}"`);
 
     // Call Fyers validate-authcode endpoint (API v3)
     const response = await fetch('https://api-t1.fyers.in/api/v3/validate-authcode', {
