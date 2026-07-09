@@ -20,6 +20,7 @@ function getAbsoluteRedirectUrl(path: string, request: Request): string {
 export async function GET(request: Request) {
   let accountId = '';
   try {
+    console.log(`[Fyers Callback] Raw incoming request URL: "${request.url}"`);
     const { searchParams } = new URL(request.url);
     const code = searchParams.get('code');
     const state = searchParams.get('state'); // State maps to accountId
