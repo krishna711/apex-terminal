@@ -172,7 +172,7 @@ export async function POST(request: Request) {
           stopPrice: (mappedType === 3 || mappedType === 4) ? Number(leg.triggerPrice || 0) : 0,
           validity: 'DAY',
           disclosedQty: 0,
-          offlineOrder: 'False',
+          offlineOrder: false,
         };
 
         console.log('[Basket Fyers Leg] Placing payload:', payload);
