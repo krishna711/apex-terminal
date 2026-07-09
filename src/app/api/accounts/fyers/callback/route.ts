@@ -9,6 +9,14 @@ function getMidnight(): Date {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 }
 
+// Helper to construct absolute redirect URLs utilizing proxy forwarding headers
+function getAbsoluteRedirectUrl(path: string, request: Request): string {
+  const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
+  const proto = request.headers.get('x-forwarded-proto') || 
+                (host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
+  return `${proto}://${host}${path}`;
+}
+
 export async function GET(request: Request) {
   let accountId = '';
   try {
@@ -18,7 +26,7 @@ export async function GET(request: Request) {
 
     if (!code || !state) {
       console.error('[Fyers Callback] Missing code or state parameters');
-      return NextResponse.redirect(new URL('/?error=Fyers login failed: Missing auth parameters.', request.url));
+      return NextResponse.redirect(getAbsoluteRedirectUrl('/?error=Fyers login failed: Missing auth parameters.', request));
     }
 
     accountId = state;
@@ -29,13 +37,13 @@ export async function GET(request: Request) {
 
     if (!account) {
       console.error(`[Fyers Callback] Account not found for ID: ${accountId}`);
-      return NextResponse.redirect(new URL('/?error=Fyers login failed: Account record not found.', request.url));
+      return NextResponse.redirect(getAbsoluteRedirectUrl('/?error=Fyers login failed: Account record not found.', request));
     }
 
     const apiSecret = decrypt(account.apiSecret);
     if (!account.apiKey || !apiSecret) {
       console.error(`[Fyers Callback] API Key or Secret missing for account: ${account.name}`);
-      return NextResponse.redirect(new URL('/?error=Fyers login failed: Account is missing App ID or Secret.', request.url));
+      return NextResponse.redirect(getAbsoluteRedirectUrl('/?error=Fyers login failed: Account is missing App ID or Secret.', request));
     }
 
     // Generate SHA-256 hash of appId:appSecret
@@ -64,7 +72,7 @@ export async function GET(request: Request) {
     if (!response.ok || data.s !== 'ok' || !data.access_token) {
       console.error('[Fyers Callback] Token validation failed:', data);
       const errMsg = data.message || 'Token validation failed';
-      return NextResponse.redirect(new URL(`/?error=Fyers login failed: ${encodeURIComponent(errMsg)}`, request.url));
+      return NextResponse.redirect(getAbsoluteRedirectUrl(`/?error=Fyers login failed: ${encodeURIComponent(errMsg)}`, request));
     }
 
     // Save access token and set expiry to midnight
@@ -79,12 +87,12 @@ export async function GET(request: Request) {
     });
 
     console.log(`[Fyers Callback] Successfully authenticated Fyers account: ${account.name}`);
-    return NextResponse.redirect(new URL(`/?success=Successfully logged into Fyers`, request.url));
+    return NextResponse.redirect(getAbsoluteRedirectUrl(`/?success=Successfully logged into Fyers`, request));
 
   } catch (error: any) {
     console.error('[Fyers Callback] Process crashed:', error);
     return NextResponse.redirect(
-      new URL(`/?error=Fyers login crashed: ${encodeURIComponent(error.message || 'Unknown error')}`, request.url)
+      getAbsoluteRedirectUrl(`/?error=Fyers login crashed: ${encodeURIComponent(error.message || 'Unknown error')}`, request)
     );
   }
 }

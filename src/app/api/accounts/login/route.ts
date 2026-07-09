@@ -145,9 +145,10 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Fyers App ID (API Key) is missing' }, { status: 400 });
       }
 
-      // Determine correct redirect callback URI using request headers
-      const host = request.headers.get('host') || 'localhost:3000';
-      const protocol = host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
+      // Determine correct redirect callback URI using x-forwarded headers if behind Nginx
+      const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
+      const protocol = request.headers.get('x-forwarded-proto') || 
+                       (host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
       const callbackUrl = `${protocol}://${host}/api/accounts/fyers/callback`;
 
       const fyersAuthUrl = `https://api-t1.fyers.in/api/v3/generate-authcode?client_id=${account.apiKey}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&state=${id}`;
