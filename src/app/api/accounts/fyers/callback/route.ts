@@ -65,6 +65,9 @@ export async function GET(request: Request) {
       .digest('hex');
 
     console.log(`[Fyers Callback] Exchanging auth code for account: ${account.name}`);
+    console.log(`[Fyers Callback] App ID (apiKey): "${account.apiKey}"`);
+    console.log(`[Fyers Callback] Decrypted secret length: ${apiSecret ? apiSecret.length : 0}`);
+    console.log(`[Fyers Callback] Computed appIdHash: "${appIdHash}"`);
 
     // Construct the exact callback URL passed to Fyers during auth code generation
     const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
