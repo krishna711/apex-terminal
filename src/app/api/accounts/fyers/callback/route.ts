@@ -61,7 +61,7 @@ export async function GET(request: Request) {
     // Generate SHA-256 hash of appId:appSecret
     const appIdHash = crypto
       .createHash('sha256')
-      .update(`${account.apiKey}${apiSecret}`)
+      .update(`${account.apiKey}:${apiSecret}`)
       .digest('hex');
 
     console.log(`[Fyers Callback] Exchanging auth code for account: ${account.name}`);
