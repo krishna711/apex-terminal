@@ -57,6 +57,7 @@ export async function POST(request: Request) {
     const cleanTotpSecret = totpSecret?.trim();
 
     // Encrypt sensitive fields
+    const encryptedApiSecret = encrypt(cleanApiSecret);
     const encryptedPassword = encrypt(cleanPassword);
     const encryptedTotpSecret = encrypt(cleanTotpSecret);
 
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
         broker: broker.toUpperCase(),
         clientId: cleanClientId,
         apiKey: cleanApiKey,
-        apiSecret: cleanApiSecret,
+        apiSecret: encryptedApiSecret,
         password: encryptedPassword,
         totpSecret: encryptedTotpSecret,
       },
