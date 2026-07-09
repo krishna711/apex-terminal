@@ -67,10 +67,8 @@ export async function GET(request: Request) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        grant_type: 'authorization_code',
-        appIdHash: appIdHash,
-        code: code,
-        redirect_uri: callbackUrl,
+        app_id_hash: appIdHash,
+        auth_code: code,
       }),
     });
 
