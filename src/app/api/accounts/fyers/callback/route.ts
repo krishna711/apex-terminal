@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   try {
     console.log(`[Fyers Callback] Raw incoming request URL: "${request.url}"`);
     const { searchParams } = new URL(request.url);
-    const code = searchParams.get('code');
+    const code = searchParams.get('auth_code');
     const state = searchParams.get('state'); // State maps to accountId
 
     if (!code || !state) {
