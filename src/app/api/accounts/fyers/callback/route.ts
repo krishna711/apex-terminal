@@ -54,6 +54,12 @@ export async function GET(request: Request) {
 
     console.log(`[Fyers Callback] Exchanging auth code for account: ${account.name}`);
 
+    // Construct the exact callback URL passed to Fyers during auth code generation
+    const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
+    const protocol = request.headers.get('x-forwarded-proto') || 
+                     (host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
+    const callbackUrl = `${protocol}://${host}/api/accounts/fyers/callback`;
+
     // Call Fyers validate-authcode endpoint
     const response = await fetch('https://api-t1.fyers.in/api/v3/validate-authcode', {
       method: 'POST',
@@ -64,6 +70,7 @@ export async function GET(request: Request) {
         grant_type: 'authorization_code',
         appIdHash: appIdHash,
         code: code,
+        redirect_uri: callbackUrl,
       }),
     });
 
