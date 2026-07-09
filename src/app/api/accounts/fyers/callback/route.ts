@@ -40,6 +40,18 @@ export async function GET(request: Request) {
       return NextResponse.redirect(getAbsoluteRedirectUrl('/?error=Fyers login failed: Account record not found.', request));
     }
 
+    // Defensive check: If the account has an access token and was logged in within the last 15 seconds,
+    // redirect to success. This prevents double-request/prefetching race conditions from consuming the code twice.
+    const now = new Date();
+    const isRecentlyLoggedIn = account.accessToken && 
+                               account.lastLogin && 
+                               (now.getTime() - new Date(account.lastLogin).getTime() < 15000);
+
+    if (isRecentlyLoggedIn) {
+      console.log(`[Fyers Callback] Account ${account.name} was recently authenticated. Skipping duplicate exchange.`);
+      return NextResponse.redirect(getAbsoluteRedirectUrl(`/?success=Successfully logged into Fyers`, request));
+    }
+
     const apiSecret = decrypt(account.apiSecret);
     if (!account.apiKey || !apiSecret) {
       console.error(`[Fyers Callback] API Key or Secret missing for account: ${account.name}`);
@@ -60,15 +72,17 @@ export async function GET(request: Request) {
                      (host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
     const callbackUrl = `${protocol}://${host}/api/accounts/fyers/callback`;
 
-    // Call Fyers validate-authcode endpoint
+    // Call Fyers validate-authcode endpoint (API v3)
     const response = await fetch('https://api-t1.fyers.in/api/v3/validate-authcode', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        app_id_hash: appIdHash,
-        auth_code: code,
+        grant_type: 'authorization_code',
+        appIdHash: appIdHash,
+        code: code,
+        redirect_uri: callbackUrl,
       }),
     });
 
