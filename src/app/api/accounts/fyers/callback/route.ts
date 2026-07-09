@@ -75,8 +75,8 @@ export async function GET(request: Request) {
                      (host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
     const callbackUrl = `${protocol}://${host}/api/accounts/fyers/callback`;
 
-    // Call Fyers validate-authcode endpoint (API v3)
-    const response = await fetch('https://api-t1.fyers.in/api/v3/validate-authcode', {
+    // Call Fyers token endpoint (API v3)
+    const response = await fetch('https://api-t1.fyers.in/api/v3/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
